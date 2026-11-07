@@ -20,7 +20,7 @@ html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;font:13px/1.
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Cesium.js"></script>
 <script>
 // 1) Бесплатный токен: https://ion.cesium.com -> Access Tokens -> Create token
-const TOKEN=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6ImVvMlI2YUdqU3NqU252TkciLCJqdGkiOiJjOTZlNTgwMi02YWQ2LTQ4YTItODA0MC1lOWNiODA1YjEyOGEiLCJpZCI6NTQ0NDEzLCJzdWIiOiJoYW5paXJ0aW5nIiwiaXNzIjoiaHR0cHM6Ly9hcGkuY2VzaXVtLmNvbSIsImF1ZCI6IkJyYWluLXRlc2xhIiwiaWF0IjoxNzk0MDU2MDc5fQ.SeSQx-xmw6w_zfYVt0lDcAw4Qvv_euJvGUu_wIZuqXE;
+const TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6ImVvMlI2YUdqU3NqU252TkciLCJqdGkiOiJjOTZlNTgwMi02YWQ2LTQ4YTItODA0MC1lOWNiODA1YjEyOGEiLCJpZCI6NTQ0NDEzLCJzdWIiOiJoYW5paXJ0aW5nIiwiaXNzIjoiaHR0cHM6Ly9hcGkuY2VzaXVtLmNvbSIsImF1ZCI6IkJyYWluLXRlc2xhIiwiaWF0IjoxNzk0MDU2MDc5fQ.SeSQx-xmw6w_zfYVt0lDcAw4Qvv_euJvGUu_wIZuqXE";
 const START=[37.6173,55.7558]; // долгота, широта (по умолчанию Москва)
 (async()=>{
 const C=Cesium,R=Math.random,cl=(x,a,b)=>Math.max(a,Math.min(b,x));C.Ion.defaultAccessToken=TOKEN;
