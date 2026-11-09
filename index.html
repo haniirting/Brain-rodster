@@ -16,14 +16,17 @@ html,body{height:100%;margin:0;background:var(--bg);overflow:hidden;font:13px/1.
 <div id="c"></div>
 <div id="hud" class="p"><div id="ht"></div><input id="q" placeholder="Город или адрес + Enter"></div>
 <div id="rw" class="p"><canvas id="rs" width="300" height="120"></canvas></div><div id="msg" class="p"></div>
+<div id="err" class="p" style="left:8px;bottom:70px;max-width:90vw;color:#ff9a9a;display:none;font-size:11px;word-break:break-all"></div>
 <div id="bt" class="p"><button data-m="map">🗺 Карта</button><button data-m="cabin">👁 Кабина</button><button data-m="orbit">🎥 Рядом</button><button id="nf">🪰 Новая муха</button><button id="fl">🚀 Взлёт</button><button id="rb">🧠 Сброс</button></div>
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.119.0/Build/Cesium/Cesium.js"></script>
 <script>
 const START=[37.6173,55.7558]; // долгота, широта: где стартует машина (Москва)
+const VER='v8';const eb=document.getElementById('err'),showErr=t=>{eb.style.display='block';eb.textContent=(eb.textContent+' | '+t).slice(-400)};
+addEventListener('error',e=>showErr(e.message+' ('+e.lineno+')'));addEventListener('unhandledrejection',e=>showErr('promise: '+(e.reason&&e.reason.message||e.reason)));
 (async()=>{
 const C=Cesium,R=Math.random,cl=(x,a,b)=>Math.max(a,Math.min(b,x));
 const V=new C.Viewer('c',{baseLayer:new C.ImageryLayer(new C.UrlTemplateImageryProvider({url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',maximumLevel:19,credit:'Esri World Imagery'})),baseLayerPicker:false,timeline:false,animation:false,homeButton:false,geocoder:false,sceneModePicker:false,navigationHelpButton:false,fullscreenButton:false,infoBox:false,selectionIndicator:false});
-V.scene.globe.depthTestAgainstTerrain=true;V.scene.screenSpaceCameraController.enableInputs=false;
+V.scene.globe.depthTestAgainstTerrain=true;V.scene.renderError.addEventListener((sc,er)=>showErr('render: '+(er&&er.message||er)));V.scene.screenSpaceCameraController.enableInputs=false;
 let bPrim=null;
 // локальная система координат (восток/север) вокруг машины
 let M;const W=(e,n,h)=>C.Matrix4.multiplyByPoint(M,new C.Cartesian3(e,n,h),new C.Cartesian3());
@@ -32,7 +35,7 @@ const setOrigin=(lo,la)=>{M=C.Transforms.eastNorthUpToFixedFrame(C.Cartesian3.fr
 const P=(e,n,o)=>{const c=C.Cartographic.fromCartesian(W(e,n,0)),g=V.scene.globe.getHeight(c);if(g!==undefined)car.h0=g;return C.Cartesian3.fromRadians(c.longitude,c.latitude,(g??car.h0)+o)};
 const deg=()=>{const c=C.Cartographic.fromCartesian(W(car.e,car.n,0));return [C.Math.toDegrees(c.longitude),C.Math.toDegrees(c.latitude)]};
 // настоящая карта: здания и улицы из OpenStreetMap (Overpass)
-let Mi,Bd=[],Rd=[],RC=[],RP=[],fc=null,fetching=false,retryT=0,st='';
+let Mi,Bd=[],Rd=[],RC=[],RP=[],fc=null,fetching=false,retryT=0,st='',n3d=0;
 const ptsIn=(x,y,p)=>{let c=false;for(let i=0,j=p.length-1;i<p.length;j=i++)if((p[i][1]>y)!=(p[j][1]>y)&&x<(p[j][0]-p[i][0])*(y-p[i][1])/(p[j][1]-p[i][1])+p[i][0])c=!c;return c};
 const proj=()=>{Mi=C.Matrix4.inverse(M,new C.Matrix4());const f=ll=>{const q=C.Matrix4.multiplyByPoint(Mi,C.Cartesian3.fromDegrees(ll[0],ll[1],0),new C.Cartesian3());return [q.x,q.y]};
  for(const w of Bd.concat(Rd)){w.p=w.raw.map(f);let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(const q of w.p){x0=Math.min(x0,q[0]);x1=Math.max(x1,q[0]);y0=Math.min(y0,q[1]);y1=Math.max(y1,q[1])}Object.assign(w,{x0,x1,y0,y1});
@@ -57,7 +60,7 @@ async function loadMap(){if(fetching)return;fetching=true;const [lo,la]=deg();
    if(w.tags&&w.tags.building)b.push({raw,h:parseFloat(w.tags.height)||(parseFloat(w.tags['building:levels'])||2.5)*3.2});else if(w.tags&&w.tags.highway)rd.push({raw,road:true,car:CAR_HW.has(w.tags.highway),ped:PED_HW.has(w.tags.highway)})}
   Bd=b;Rd=rd;proj();if(bPrim)V.scene.primitives.remove(bPrim);
   const gi=[];for(const w of b){try{const g=bGeo(w);if(g)gi.push(new C.GeometryInstance({geometry:g,attributes:{color:C.ColorGeometryInstanceAttribute.fromColor(C.Color.fromHsl(.58,.08,.5+((w.h*7)%10)/40,1))}}))}catch(e){}}
-  bPrim=V.scene.primitives.add(new C.Primitive({geometryInstances:gi,appearance:new C.PerInstanceColorAppearance({translucent:false}),asynchronous:false,allowPicking:false}));RC=Rd.filter(w=>w.car&&w.len>20);RP=Rd.filter(w=>w.ped&&w.len>10);fc=[lo,la];A.forEach(spawn)}catch(e){fc=null;retryT=performance.now()+8000;say('Карта: '+(st||'ошибка')+', повторяю...')}fetching=false}
+  n3d=gi.length;try{bPrim=V.scene.primitives.add(new C.Primitive({geometryInstances:gi,appearance:new C.PerInstanceColorAppearance({translucent:false}),asynchronous:false,allowPicking:false}))}catch(e){showErr('3D: '+e.message)}RC=Rd.filter(w=>w.car&&w.len>20);RP=Rd.filter(w=>w.ped&&w.len>10);fc=[lo,la];A.forEach(spawn)}catch(e){fc=null;retryT=performance.now()+8000;say('Карта: '+(st||'ошибка')+', повторяю...')}fetching=false}
 // машина (Tesla Roadster, упрощённо)
 car.p=P(0,0,.6);const hp=()=>new C.HeadingPitchRoll(car.h,0,0);let cabP=car.p,flP=car.p;
 const mk=(pos,dim,col,shape)=>V.entities.add({position:new C.CallbackProperty(pos,false),orientation:new C.CallbackProperty(()=>C.Transforms.headingPitchRollQuaternion(pos(),hp()),false),[shape]:shape=='box'?{dimensions:dim,material:col}:{radii:dim,material:col}});
@@ -101,7 +104,7 @@ function brain(inp,dt){const cnt=[0,0,0,0,0];
   v[i]+=dt*(-v[i]+sy[i]+bi[i]+(R()-.5)*.3)/.02;if(v[i]>1){v[i]=0;rf[i]=.004;spike(i);if(i>=NS+NC)cnt[Math.floor((i-NS-NC)/12)]++}}
  for(let m=0;m<5;m++)mr[m]+=(cnt[m]/12/dt/40-mr[m])*dt/.15}
 // камеры и интерфейс
-let mode='orbit';const ob={th:.6,ph:.45,d:14},btns=document.querySelectorAll('#bt button[data-m]');
+let mode='orbit';const ob={th:.6,ph:.22,d:16},btns=document.querySelectorAll('#bt button[data-m]');
 const setMode=m=>{mode=m;btns.forEach(b=>b.classList.toggle('on',b.dataset.m==m))};btns.forEach(b=>b.onclick=()=>setMode(b.dataset.m));setMode('orbit');
 document.getElementById('nf').onclick=newFly;document.getElementById('fl').onclick=()=>{flT=10;say('🚀 Взлёт!')};document.getElementById('rb').onclick=()=>{PL.forEach(l=>l[1]=l[3]);xp=0;try{localStorage.removeItem('flybrain2')}catch(e){}};
 addEventListener('keydown',e=>{if(e.target.id=='q')return;if(e.key=='1')setMode('map');if(e.key=='2')setMode('cabin');if(e.key=='3')setMode('orbit');if(e.key=='f')newFly();if(e.key==' ')flT=10});
@@ -154,6 +157,6 @@ V.scene.preUpdate.addEventListener(()=>{const now=performance.now(),dt=Math.min(
  else cam.lookAt(car.p,new C.HeadingPitchRange(car.h+ob.th,-ob.ph,ob.d));
  rc.drawImage(rc.canvas,-3,0);rc.fillStyle='#0b1020';rc.fillRect(RW-3,0,3,RHt);
  for(let i=0;i<NT;i++)if(fs[i]){rc.fillStyle=i<NS?'#5ec8ff':i<NS+NC?'#b8c0d8':'#ffb347';rc.fillRect(RW-3,i*RHt/NT,3,2);fs[i]=0}
- if(fr%6==0)ht.innerHTML='🪰 Поймано: <b>'+score+'</b> (опыт мозга: '+xp+') · ⚡ '+Math.round(Math.abs(car.v)*3.6)+' км/ч'+(thrT>0?' 🚀':'')+'<br>🔧 '+Math.round(car.dmg)+'% · 💥 '+car.crashes+' · ☠ '+kills+' · ✈ '+np+' · 🏢 '+Bd.length+(Bd.length?'':' ('+(st||'загрузка карты…')+')')+'<small>Карта, здания и улицы настоящие (OpenStreetMap). Люди и машины ходят по настоящим улицам, но их движение смоделировано.</small>'});
+ if(fr%6==0)ht.innerHTML='🪰 Поймано: <b>'+score+'</b> (опыт мозга: '+xp+') · ⚡ '+Math.round(Math.abs(car.v)*3.6)+' км/ч'+(thrT>0?' 🚀':'')+'<br>🔧 '+Math.round(car.dmg)+'% · 💥 '+car.crashes+' · ☠ '+kills+' · ✈ '+np+' · 🏢 '+Bd.length+' (3D '+n3d+')'+(Bd.length?'':' ('+(st||'загрузка карты…')+')')+'<small>'+VER+' · Карта, здания и улицы настоящие (OpenStreetMap). Люди и машины ходят по настоящим улицам, но их движение смоделировано.</small>'});
 })();
 </script></body></html>
