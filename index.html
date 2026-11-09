@@ -32,26 +32,39 @@ const setOrigin=(lo,la)=>{M=C.Transforms.eastNorthUpToFixedFrame(C.Cartesian3.fr
 const P=(e,n,o)=>{const c=C.Cartographic.fromCartesian(W(e,n,0)),g=V.scene.globe.getHeight(c);if(g!==undefined)car.h0=g;return C.Cartesian3.fromRadians(c.longitude,c.latitude,(g??car.h0)+o)};
 const deg=()=>{const c=C.Cartographic.fromCartesian(W(car.e,car.n,0));return [C.Math.toDegrees(c.longitude),C.Math.toDegrees(c.latitude)]};
 // настоящая карта: здания и улицы из OpenStreetMap (Overpass)
-let Mi,Bd=[],Rd=[],RC=[],RP=[],fc=null,fetching=false,retryT=0;
+let Mi,Bd=[],Rd=[],RC=[],RP=[],fc=null,fetching=false,retryT=0,st='';
 const ptsIn=(x,y,p)=>{let c=false;for(let i=0,j=p.length-1;i<p.length;j=i++)if((p[i][1]>y)!=(p[j][1]>y)&&x<(p[j][0]-p[i][0])*(y-p[i][1])/(p[j][1]-p[i][1])+p[i][0])c=!c;return c};
 const proj=()=>{Mi=C.Matrix4.inverse(M,new C.Matrix4());const f=ll=>{const q=C.Matrix4.multiplyByPoint(Mi,C.Cartesian3.fromDegrees(ll[0],ll[1],0),new C.Cartesian3());return [q.x,q.y]};
  for(const w of Bd.concat(Rd)){w.p=w.raw.map(f);let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(const q of w.p){x0=Math.min(x0,q[0]);x1=Math.max(x1,q[0]);y0=Math.min(y0,q[1]);y1=Math.max(y1,q[1])}Object.assign(w,{x0,x1,y0,y1});
   if(w.road){w.cum=[0];for(let i=1;i<w.p.length;i++)w.cum.push(w.cum[i-1]+Math.hypot(w.p[i][0]-w.p[i-1][0],w.p[i][1]-w.p[i-1][1]));w.len=w.cum[w.cum.length-1]}}};
 const CAR_HW=new Set(['motorway','trunk','primary','secondary','tertiary','residential','unclassified','living_street']),PED_HW=new Set(['footway','pedestrian','path','residential','living_street','steps','tertiary','secondary','service','cycleway']);
+// своя 3D-геометрия зданий: стены + крыша (двусторонняя, без зависимости от обхода вершин)
+function bGeo(w){let p=w.p.slice();if(p.length>1&&p[0][0]==p[p.length-1][0]&&p[0][1]==p[p.length-1][1])p.pop();
+ const q=p.filter((v,i,a)=>i==0||v[0]!=a[i-1][0]||v[1]!=a[i-1][1]);if(q.length<3||q.length>300)return null;
+ const h=Math.max(w.h,4),pos=[],nor=[],idx=[],V3=(x,y,z)=>new C.Cartesian3(x,y,z),dir=(x,y,z)=>C.Matrix4.multiplyByPointAsVector(M,V3(x,y,z),new C.Cartesian3()),up=dir(0,0,1);
+ const push=(e,n,z)=>{const c=W(e,n,z);pos.push(c.x,c.y,c.z)};
+ for(let i=0;i<q.length;i++){const a=q[i],b=q[(i+1)%q.length],dx=b[0]-a[0],dy=b[1]-a[1],l=Math.hypot(dx,dy)||1,nn=dir(dy/l,-dx/l,0),k=pos.length/3;
+  push(a[0],a[1],0);push(b[0],b[1],0);push(b[0],b[1],h);push(a[0],a[1],h);for(let t=0;t<4;t++)nor.push(nn.x,nn.y,nn.z);idx.push(k,k+1,k+2,k,k+2,k+3)}
+ let tri=null;try{tri=C.PolygonPipeline.triangulate(q.map(v=>new C.Cartesian2(v[0],v[1])))}catch(e){}
+ if(tri&&tri.length){const k=pos.length/3;for(const v of q){push(v[0],v[1],h);nor.push(up.x,up.y,up.z)}for(const t of tri)idx.push(k+t)}
+ return new C.Geometry({attributes:{position:new C.GeometryAttribute({componentDatatype:C.ComponentDatatype.DOUBLE,componentsPerAttribute:3,values:new Float64Array(pos)}),normal:new C.GeometryAttribute({componentDatatype:C.ComponentDatatype.FLOAT,componentsPerAttribute:3,values:new Float32Array(nor)})},indices:new Uint32Array(idx),primitiveType:C.PrimitiveType.TRIANGLES,boundingSphere:C.BoundingSphere.fromVertices(pos)})}
+async function ov(q){for(const u of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter','https://overpass.private.coffee/api/interpreter']){
+ try{const c=new AbortController(),t=setTimeout(()=>c.abort(),20000);const x=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q),signal:c.signal});clearTimeout(t);if(!x.ok){st='сервер '+x.status;continue}const j=await x.json();if(j.elements&&j.elements.length)return j;st='сервер вернул пусто'}catch(e){st='нет связи с сервером'}}return null}
 async function loadMap(){if(fetching)return;fetching=true;const [lo,la]=deg();
- try{const q='[out:json][timeout:25];(way["building"](around:550,'+la+','+lo+');relation["building"](around:550,'+la+','+lo+');way["highway"](around:550,'+la+','+lo+'););out geom;';
-  let r=null;for(const u of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){try{const x=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q)});if(x.ok){r=await x.json();break}}catch(e){}}if(!r)throw 0;const b=[],rd=[];
+ try{let r=null;for(const rad of [400,220]){const g='(around:'+rad+','+la+','+lo+')';r=await ov('[out:json][timeout:20];(way["building"]'+g+';relation["building"]["type"="multipolygon"]'+g+';way["highway"]'+g+';);out geom;');if(r)break}
+  if(!r)throw 0;const b=[],rd=[];
   for(const w of r.elements||[]){if(w.type=='relation'){const t=w.tags||{};for(const m of w.members||[])if(m.role=='outer'&&m.geometry&&m.geometry.length>3)b.push({raw:m.geometry.map(g=>[g.lon,g.lat]),h:parseFloat(t.height)||(parseFloat(t['building:levels'])||2.5)*3.2});continue}if(!w.geometry||w.geometry.length<2)continue;const raw=w.geometry.map(g=>[g.lon,g.lat]);
    if(w.tags&&w.tags.building)b.push({raw,h:parseFloat(w.tags.height)||(parseFloat(w.tags['building:levels'])||2.5)*3.2});else if(w.tags&&w.tags.highway)rd.push({raw,road:true,car:CAR_HW.has(w.tags.highway),ped:PED_HW.has(w.tags.highway)})}
   Bd=b;Rd=rd;proj();if(bPrim)V.scene.primitives.remove(bPrim);
-  const gi=[];for(const w of b){const r=w.raw;if(r.length<4||r[0][0]!=r[r.length-1][0]||r[0][1]!=r[r.length-1][1])continue;try{gi.push(new C.GeometryInstance({geometry:new C.PolygonGeometry({polygonHierarchy:new C.PolygonHierarchy(C.Cartesian3.fromDegreesArray(r.slice(0,-1).filter((q,i,ar)=>i==0||q[0]!=ar[i-1][0]||q[1]!=ar[i-1][1]).flat())),height:0,extrudedHeight:w.h,vertexFormat:C.PerInstanceColorAppearance.VERTEX_FORMAT}),attributes:{color:C.ColorGeometryInstanceAttribute.fromColor(C.Color.fromHsl(.58,.08,.5+((w.h*7)%10)/40,1))}}))}catch(e){}}
-  bPrim=V.scene.primitives.add(new C.Primitive({geometryInstances:gi,appearance:new C.PerInstanceColorAppearance({translucent:false}),asynchronous:true}));RC=Rd.filter(w=>w.car&&w.len>20);RP=Rd.filter(w=>w.ped&&w.len>10);fc=[lo,la];A.forEach(spawn)}catch(e){fc=null;retryT=performance.now()+8000;say('Карта OSM недоступна, повторяю...')}fetching=false}
+  const gi=[];for(const w of b){try{const g=bGeo(w);if(g)gi.push(new C.GeometryInstance({geometry:g,attributes:{color:C.ColorGeometryInstanceAttribute.fromColor(C.Color.fromHsl(.58,.08,.5+((w.h*7)%10)/40,1))}}))}catch(e){}}
+  bPrim=V.scene.primitives.add(new C.Primitive({geometryInstances:gi,appearance:new C.PerInstanceColorAppearance({translucent:false}),asynchronous:false,allowPicking:false}));RC=Rd.filter(w=>w.car&&w.len>20);RP=Rd.filter(w=>w.ped&&w.len>10);fc=[lo,la];A.forEach(spawn)}catch(e){fc=null;retryT=performance.now()+8000;say('Карта: '+(st||'ошибка')+', повторяю...')}fetching=false}
 // машина (Tesla Roadster, упрощённо)
 car.p=P(0,0,.6);const hp=()=>new C.HeadingPitchRoll(car.h,0,0);let cabP=car.p,flP=car.p;
 const mk=(pos,dim,col,shape)=>V.entities.add({position:new C.CallbackProperty(pos,false),orientation:new C.CallbackProperty(()=>C.Transforms.headingPitchRollQuaternion(pos(),hp()),false),[shape]:shape=='box'?{dimensions:dim,material:col}:{radii:dim,material:col}});
 const body=mk(()=>car.p,new C.Cartesian3(1.95,4.3,.7),C.Color.fromCssColorString('#c4121a'),'box');
 const cab=mk(()=>cabP,new C.Cartesian3(1.5,1.7,.45),C.Color.fromCssColorString('#1b2430').withAlpha(.75),'box');
 const flame=mk(()=>flP,new C.Cartesian3(.35,1.4,.35),C.Color.ORANGE,'ellipsoid');flame.show=false;
+const wl=[[-1,1.35],[1,1.35],[-1,-1.35],[1,-1.35]].map(([x,z])=>{const o={x,z,p:car.p};mk(()=>o.p,new C.Cartesian3(.16,.37,.37),C.Color.fromCssColorString('#111'),'ellipsoid');return o});
 // объекты: люди, машины, муха
 const pts=V.scene.primitives.add(new C.PointPrimitiveCollection()),A=[];
 const along=(w,s)=>{const c=w.cum;let i=1;while(i<c.length-1&&c[i]<s)i++;const t=(s-c[i-1])/Math.max(c[i]-c[i-1],1e-6),p=w.p[i-1],q=w.p[i];return [p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t]};
@@ -134,13 +147,13 @@ V.scene.preUpdate.addEventListener(()=>{const now=performance.now(),dt=Math.min(
  if(dist<5&&car.alt<12){score++;xp++;rEv+=5;prevD=null;say('🪰 Муха поймана: '+score);newFly()}
  if(fr%300==0)try{localStorage.setItem('flybrain2',JSON.stringify({w:PL.map(l=>+l[1].toFixed(3)),xp}))}catch(e){}
  fp.t+=dt;fpt.position=P(fp.e,fp.n,3+Math.sin(fp.t*3));fpt.pixelSize=mode=='map'?40:20;
- car.p=P(car.e,car.n,.6+car.alt);cabP=P(car.e-sh*.3,car.n-ch*.3,1.05+car.alt);flP=P(car.e-sh*3.2,car.n-ch*3.2,.6+car.alt);cab.show=mode!='cabin';flame.show=thrT>0||car.alt>2;
+ car.p=P(car.e,car.n,.6+car.alt);cabP=P(car.e-sh*.3,car.n-ch*.3,1.05+car.alt);flP=P(car.e-sh*3.2,car.n-ch*3.2,.6+car.alt);cab.show=mode!='cabin';flame.show=thrT>0||car.alt>2;for(const o of wl)o.p=P(car.e+o.x*ch+o.z*sh,car.n-o.x*sh+o.z*ch,.37+car.alt);
  const cam=V.camera;
  if(mode=='cabin'){cam.lookAtTransform(C.Matrix4.IDENTITY);cam.setView({destination:P(car.e+sh*.1-ch*.4,car.n+ch*.1+sh*.4,1.15+car.alt),orientation:{heading:car.h,pitch:-.04,roll:0}})}
  else if(mode=='map')cam.lookAt(car.p,new C.HeadingPitchRange(0,-1.5,700));
  else cam.lookAt(car.p,new C.HeadingPitchRange(car.h+ob.th,-ob.ph,ob.d));
  rc.drawImage(rc.canvas,-3,0);rc.fillStyle='#0b1020';rc.fillRect(RW-3,0,3,RHt);
  for(let i=0;i<NT;i++)if(fs[i]){rc.fillStyle=i<NS?'#5ec8ff':i<NS+NC?'#b8c0d8':'#ffb347';rc.fillRect(RW-3,i*RHt/NT,3,2);fs[i]=0}
- if(fr%6==0)ht.innerHTML='🪰 Поймано: <b>'+score+'</b> (опыт мозга: '+xp+') · ⚡ '+Math.round(Math.abs(car.v)*3.6)+' км/ч'+(thrT>0?' 🚀':'')+'<br>🔧 '+Math.round(car.dmg)+'% · 💥 '+car.crashes+' · ☠ '+kills+' · ✈ '+np+' · 🏢 '+Bd.length+'<small>Карта, здания и улицы настоящие (OpenStreetMap). Люди и машины ходят по настоящим улицам, но их движение смоделировано.</small>'});
+ if(fr%6==0)ht.innerHTML='🪰 Поймано: <b>'+score+'</b> (опыт мозга: '+xp+') · ⚡ '+Math.round(Math.abs(car.v)*3.6)+' км/ч'+(thrT>0?' 🚀':'')+'<br>🔧 '+Math.round(car.dmg)+'% · 💥 '+car.crashes+' · ☠ '+kills+' · ✈ '+np+' · 🏢 '+Bd.length+(Bd.length?'':' ('+(st||'загрузка карты…')+')')+'<small>Карта, здания и улицы настоящие (OpenStreetMap). Люди и машины ходят по настоящим улицам, но их движение смоделировано.</small>'});
 })();
 </script></body></html>
